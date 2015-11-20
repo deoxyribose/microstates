@@ -14,7 +14,7 @@
 % along with this program; if not, write to the Free Software
 % Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-function [OUTEEG, com] = pop_getmicrostates( INEEG, subset, nMCRSTSfrom, nMCRSTSto, clustering_algorithm, draw);
+function [OUTEEG, com] = pop_getmicrostates( INEEG, subset, nMCRSTSfrom, nMCRSTSto, clustering_algorithm, draw, lambda, chronos);
 
 % SUMMARY:
 % pop_getmicrostates clusters a <subset> of <INEEG.data> into a varying number of
@@ -41,7 +41,7 @@ if nargin < 3
         { 'style', 'edit', 'string', '4' 'tag' 'nMCRSTSfrom'} , ...
         { 'style', 'edit', 'string', '20' 'tag' 'nMCRSTSto'} , ...
         { 'style', 'text', 'string', [ 'Choose clustering algorithm:' 10 10 10 10] }, ...
-        { 'style', 'listbox', 'string', 'ICA|Kmeans|Agglomerative|N-microstate|DPmeans' 'tag' 'algorithm' }, ...
+        { 'style', 'listbox', 'string', 'ICA|Kmeans|Agglomerative|N-microstate|DPmeans|Multi-Garrote' 'tag' 'algorithm' }, ...
         { 'style', 'text', 'string', [ 'Choose subset of data (default is all)' 10 ] }, ...
         { 'style', 'edit', 'string', '1' 'tag' 'start'} , ...
         { 'style', 'edit', 'string', num2str(OUTEEG.pnts) 'tag' 'end'} , ...
@@ -305,7 +305,6 @@ switch OUTEEG.clustering_algorithm
         clustering_algorithm = 'N-microstates';
         signal = signal(1:end-1,:);
         for k=OUTEEG.nMCRSTSfrom:OUTEEG.nMCRSTSto
-            k
             best_energy_so_far = Inf;
             for m=1:MULTI
                 % The basic N-microstate algorithm
@@ -386,9 +385,11 @@ switch OUTEEG.clustering_algorithm
     case 5
         clustering_algorithm = 'DP-means';
         signal = signal(1:end-1,:);
-        lambda = 100;
+        %lambda = 257; % found with bayesopt
+        lambda = 150;
         k = 1;
         z = ones(length(signal),1);
+        oldz = z;
         mu = mean(signal,2);
         converged = 0;
         oldobj = Inf;
@@ -411,6 +412,7 @@ switch OUTEEG.clustering_algorithm
                 end
             end
             if length(unique(z)) < max(z)
+                z
                 z = z-1;
                 k = k-1;
                 mu = mu(:,2:end);
@@ -421,15 +423,32 @@ switch OUTEEG.clustering_algorithm
                     disp('lol');
                 end
             end
-            obj = sum(sum(d)) + lambda*k;
-            rel_improvement = abs(1 - oldobj/obj);
-            converged = rel_improvement < 0.0001; % change to no changes in assignment
-            oldobj = obj;
+            if oldz == z
+                converged = 1;
+            else
+                oldz = z;
+            end
+%             obj = sum(sum(d)) + lambda*k;
+%             rel_improvement = abs(1 - oldobj/obj);
+%             converged = rel_improvement < 0.0001; % change to no changes in assignment
+%             oldobj = obj;
         end
         OUTEEG.nMCRSTS = k;
         OUTEEG.A = mu;
         OUTEEG.idx = z';
         disp('Done with DP-means')
+    case 6
+        clustering_algorithm = 'Multi-Garrote';
+        signal = signal(1:end-1,:);
+        K = 7;
+        Nits = 100;
+        alpha = 10^(-10);
+        draw = 0;
+        uni = 1;
+        [W,~,M,~] = multi_garrote(signal,K,Nits,alpha,draw,uni);
+        [~,OUTEEG.idx] = max(M,[],1);
+        OUTEEG.nMCRSTS = K;
+        OUTEEG.A = W;
     otherwise
         disp('No.')
 end
