@@ -41,7 +41,7 @@ if nargin < 3
         { 'style', 'edit', 'string', '4' 'tag' 'nMCRSTSfrom'} , ...
         { 'style', 'edit', 'string', '20' 'tag' 'nMCRSTSto'} , ...
         { 'style', 'text', 'string', [ 'Choose clustering algorithm:' 10 10 10 10] }, ...
-        { 'style', 'listbox', 'string', 'ICA|Kmeans|Agglomerative|N-microstate|DPmeans|Multi-Garrote' 'tag' 'algorithm' }, ...
+        { 'style', 'listbox', 'string', 'ICA|Kmeans|Agglomerative|N-microstate|DPmeans|Multi-Garrote|Multi-Garrote-BFGS' 'tag' 'algorithm' }, ...
         { 'style', 'text', 'string', [ 'Choose subset of data (default is all)' 10 ] }, ...
         { 'style', 'edit', 'string', '1' 'tag' 'start'} , ...
         { 'style', 'edit', 'string', num2str(OUTEEG.pnts) 'tag' 'end'} , ...
@@ -71,7 +71,7 @@ else
     draw = 0;
 end;
 % How many times to restart k-means
-MULTI = 100;
+MULTI = 10;
 switch OUTEEG.subset
     case 1
         OUTEEG.peakidx = 1:size(OUTEEG.data,2);
@@ -187,14 +187,15 @@ switch OUTEEG.clustering_algorithm
     case 2 % kmeans
         clustering_algorithm = 'kmeans';
         label = zeros(size(signal,2),number_of_ks);
-        K = double(fastrbf(signal',rbfsigma)); % double() because otherwise bug in knkmeans in line 22
+        %K = double(fastrbf(signal',rbfsigma)); % double() because otherwise bug in knkmeans in line 22
         %K = doubles(kernelmatrix('poly',signal,signal,0.01,0,4));
         if OUTEEG.nMCRSTSto~=OUTEEG.nMCRSTSfrom
             for k=krange
                 best_energy_so_far = Inf;
                 c = 0;
                 for m=1:MULTI
-                    [lbl, energy] = knkmeans(K,k);
+                    %[lbl, energy] = knkmeans(K,k);
+                    [A,lbl,~,energy] = kmeans_fast(signal',k);
                     if energy < best_energy_so_far
                         label(:,k-OUTEEG.nMCRSTSfrom+1) = lbl;
                         best_energy_so_far = energy;
@@ -227,7 +228,7 @@ switch OUTEEG.clustering_algorithm
             c = 0;
             best_energy_so_far = Inf;
             for m=1:MULTI
-                [lbl, energy] = knkmeans(K,OUTEEG.nMCRSTS);
+                [A,lbl,~,energy] = kmeans_fast(signal',OUTEEG.nMCRSTS);
                 if energy < best_energy_so_far
                     best_energy_so_far = energy;
                     c = c+1;
@@ -235,15 +236,15 @@ switch OUTEEG.clustering_algorithm
             end
             OUTEEG.idx = lbl;
         end
-        A = zeros(OUTEEG.nbchan,OUTEEG.nMCRSTS);
-        for iMCRST=1:OUTEEG.nMCRSTS
-            A(:,iMCRST) = mean(OUTEEG.data(:,OUTEEG.idx==iMCRST),2);
-        end
-        OUTEEG.A = A;
+%         A = zeros(OUTEEG.nbchan,OUTEEG.nMCRSTS);
+%         for iMCRST=1:OUTEEG.nMCRSTS
+%             A(:,iMCRST) = mean(OUTEEG.data(:,OUTEEG.idx==iMCRST),2);
+%         end
+        OUTEEG.A = A(:,1:end-1)';
         if chronos
-            OUTEEG.meanGMD = mean(GMD(signal(1:(size(signal,1)-1),:),A(:,OUTEEG.idx),size(signal,1)-1));
+            OUTEEG.meanGMD = mean(GMD(signal(1:(size(signal,1)-1),:),OUTEEG.A(:,OUTEEG.idx),size(signal,1)-1));
         else
-            OUTEEG.meanGMD = mean(GMD(signal,A(:,OUTEEG.idx),OUTEEG.nbchan));
+            OUTEEG.meanGMD = mean(GMD(signal,OUTEEG.A(:,OUTEEG.idx),OUTEEG.nbchan));
         end
         if draw
             if size(signal,2) <= 5000
@@ -440,15 +441,44 @@ switch OUTEEG.clustering_algorithm
     case 6
         clustering_algorithm = 'Multi-Garrote';
         signal = signal(1:end-1,:);
-        K = 7;
-        Nits = 100;
-        alpha = 10^(-10);
+        if OUTEEG.nMCRSTSto~=OUTEEG.nMCRSTSfrom
+            disp(['Model selection not implemented yet, proceeding with ', num2str(OUTEEG.nMCRSTSfrom)])
+        end
+        K = OUTEEG.nMCRSTSfrom;
+        alpha = 0.8;
         draw = 0;
         uni = 1;
-        [W,~,M,~] = multi_garrote(signal,K,Nits,alpha,draw,uni);
+        if draw
+            figure
+        end
+        [W,Mu,M,beta,nits] = multi_garrote(signal,K,alpha,draw,uni);
+        disp(['Converged in ', num2str(nits), ' iterations'])
         [~,OUTEEG.idx] = max(M,[],1);
         OUTEEG.nMCRSTS = K;
         OUTEEG.A = W;
+    case 7
+        clustering_algorithm = 'Multi-Garrote-BFGS';
+        signal = signal(1:end-1,:);
+        K = 3;
+        alpha = 0.8;
+        [J,T] = size(signal);
+        par = [J; T; signal(:); K;alpha];
+        x0 = getInit(signal,alpha,K);
+        fun = @(x)free_energy(x,par);
+        x = fminsearch(fun,double(x0))
+        %free_energy(x0,par)
+        %[X, info, perf, D] = quasi_newton(free_energy,par,x0, opts, D0)
+        
+        %A = zeros(size(x0));
+        %A((J*K+1):(J*K+K*T)) = 1;
+%         options = optimoptions(@fminunc,'Display','iter','Algorithm','quasi-newton','TolFun',1e-12,'GradObj','on','DerivativeCheck','on');
+%         [x,fval] = fminunc(f,double(x0),options);
+        sum(x~=x0)
+        W = reshape(x(1:J*K),J,K);
+        M = reshape(x((J*K+1):(J*K+K*T)),K,T);
+        Mu = reshape(x((J*K+1+K*T):(J*K+2*K*T)),K,T);
+        Sigma2 = reshape(x((J*K+2*K*T+1):(end-1)),K,T);
+        beta = x(end)
     otherwise
         disp('No.')
 end

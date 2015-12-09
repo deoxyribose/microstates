@@ -11,6 +11,7 @@ subsubmenu = uimenu( submenu, 'label', 'Plot');
 
 % menu callback
 getmicrostates = [try_strings.no_check '[EEG LASTCOM]=pop_getmicrostates(EEG);' catch_strings.new_and_hist];
+mstsplot = [try_strings.no_check '[EEG LASTCOM]=mstsplot(EEG);' catch_strings.new_and_hist];
 %plotspectrogram = [try_strings.no_check 'plotspectrograms(EEG, 1);' catch_strings.new_and_hist];
 plotmicrostates = [try_strings.no_check 'plotmicrostates(EEG, 1, 0);' catch_strings.new_and_hist];
 plotsequence = [try_strings.no_check 'plotsequence(EEG);' catch_strings.new_and_hist];
@@ -21,6 +22,7 @@ pointcloud = [try_strings.no_check 'show_clusters(EEG);' catch_strings.new_and_h
 
 % create menu
 uimenu( submenu, 'label', 'Estimate microstates', 'callback', getmicrostates);
+uimenu( submenu, 'label', 'Plot microstates', 'callback', mstsplot);
 uimenu( submenu, 'label', 'Microstate statistics', 'callback', microstate_statistics);
 uimenu( subsubmenu, 'label', 'Microstate maps', 'callback', plotmicrostates);
 uimenu( subsubmenu, 'label', 'Microstate sequence', 'callback', plotsequence);
