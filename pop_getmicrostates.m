@@ -33,7 +33,15 @@ OUTEEG = INEEG;
 
 % varargin = [subset, Kfrom, Kto, clustering_algorithm, draw,
 % lambda, chronos, W]
-
+if size(size(OUTEEG.data),2) > 2
+    disp(['Data has more dimensions than nbchan x pnts, the first 3 dims are : ', num2str(size(OUTEEG.data,1)),' x ',num2str(size(OUTEEG.data,2)),' x ',num2str(size(OUTEEG.data,3))])
+    disp('Do something like OUTEEG.data = OUTEEG.data(:,:,i_epoch) and press Continue')
+    disp('or!')
+    disp('...')
+    disp('You could do something like this: [OUTEEG1, com] = pop_getmicrostates( INEEG, varargin); OUTEEG.data = OUTEEG.data(:,:,i_epoch1); [OUTEEG21, com] = pop_getmicrostates( INEEG, varargin); OUTEEG.data = OUTEEG.data(:,:,i_epoch2);')
+    disp('...and press continue')
+    keyboard
+end
 % the defaults
 OUTEEG.subset = 1;
 OUTEEG.Kfrom = 3;
@@ -43,7 +51,8 @@ startframe = 1;
 endframe = OUTEEG.pnts;
 chronos = 1;
 draw = 0;
-MULTI = 1;
+MULTI = 10;
+W_init = 0;
 switch nargin
     case 2
         OUTEEG.subset = varargin{1};
@@ -88,7 +97,7 @@ switch nargin
         draw = varargin{5};
         lambda = varargin{6};
         chronos = varargin{7};
-        OUTEEG.W = varargin{8};
+        OUTEEG.W_init = varargin{8};
     otherwise
 end
 if nargin < 3
@@ -154,7 +163,7 @@ label = zeros(size(Y,2),number_of_ks);
 N = length(OUTEEG.peakidx);
 D = OUTEEG.nbchan;
 krange = OUTEEG.Kfrom:OUTEEG.Kto;
-
+disp(['Restarts ', num2str(MULTI), ' times']);
 % Now go to chosen algorithm
 switch OUTEEG.clustering_algorithm
     case 1 % ICA
@@ -331,7 +340,7 @@ switch OUTEEG.clustering_algorithm
     case 4
         b = 5;
         lambda = 7;
-        [OUTEEG.W,OUTEEG.A,OUTEEG.Z,OUTEEG.K,clustering_algorithm] = basicNmicrostates(Y(1:end-1,:),OUTEEG.Kfrom,OUTEEG.Kto,MULTI,b,lambda);
+        [OUTEEG.W,OUTEEG.A,OUTEEG.Z,OUTEEG.K,clustering_algorithm] = basicNmicrostates(double(Y(1:end-1,:)) ,OUTEEG.Kfrom,OUTEEG.Kto,MULTI,b,lambda);
     case 5
         clustering_algorithm = 'DP-means';
         Y = Y(1:end-1,:);
@@ -394,23 +403,25 @@ switch OUTEEG.clustering_algorithm
         end
         if OUTEEG.Kto~=OUTEEG.Kfrom
             disp(['Model selection not implemented yet, proceeding with ', num2str(OUTEEG.Kfrom)])
+            OUTEEG.K = OUTEEG.Kfrom;
         end
+        draw = 0;
+        verbose = 1;
         K = OUTEEG.Kfrom;
         alpha = 0.8;
-        draw = 0;
-        uni = 1;
-        if draw
-            figure
-        end
-        if nargin > 8
-            [W,Mu,M,beta,free_energy,nits] = multi_garrote(Y,K,alpha,draw,uni,OUTEEG.W);
-        else
-            [W,Mu,M,beta,free_energy,nits] = multi_garrote(Y,K,alpha,draw,uni);
-        end
+        gamma2 = -0.0519;
+        G = 1;
+        max_nits = 5000;
+        kfolds = 1;
+        %learn_rate_init = 10^(-5);
+        learn_rate_init = 0.0131;
+        learn_decay = 0.0001;
+        W_0 = W_init;
+        [W_var,Mu,M,beta_var,free_energy,recon_error,m_winner,nits] = variational_microstates_smooth(Y,K,draw,alpha,gamma2,MULTI,G,max_nits,kfolds,learn_rate_init,learn_decay,verbose);
         disp(['Converged in ', num2str(nits), ' iterations'])
         [~,OUTEEG.Z] = max(M,[],1);
         OUTEEG.K = K;
-        OUTEEG.W = W;
+        OUTEEG.W = W_var;
         OUTEEG.A = Mu;
         OUTEEG.energy = free_energy;
     case 7
@@ -419,14 +430,18 @@ switch OUTEEG.clustering_algorithm
             Y = Y(1:end-1,:);
         end
         if OUTEEG.Kto~=OUTEEG.Kfrom
-            disp(['Model selection not implemented yet, proceeding with ', num2str(OUTEEG.Kfrom)])
+            OUTEEG.K = size(OUTEEG.Y,1); % J
+            disp(['Looking for K = nbchan microstates, K = ', num2str(OUTEEG.K)])
         end
-        K = OUTEEG.Kfrom;
-        draw = 1;
-        gamma1 = -40;
-        gamma2 = 40;
-        [W,X,M,beta,nits] = polymicro_smooth(Y,K,draw,gamma1,gamma2);
-        disp(['Converged in ', num2str(nits), ' iterations'])
+        K = OUTEEG.K;
+        draw = 0;
+        gamma1 = -15;
+        gamma2 = 2;
+        max_nits = 2000;
+        learn_rate_init = 0.001;
+        learn_rate_decay = 0.00001;
+        verbose = 1;
+        [W,X,M,~,~,~,~,~,~,~,~] = polymicro_smooth(Y,'K',K,'draw',draw,'MULTI',MULTI,'max_nits',max_nits,'learn_rate_init',learn_rate_init,'learn_rate_decay',learn_rate_decay,'gamma1',gamma1,'gamma2',gamma2,'verbose',verbose);
         OUTEEG.Z = M>0.5;
         OUTEEG.K = K;
         OUTEEG.W = W;
