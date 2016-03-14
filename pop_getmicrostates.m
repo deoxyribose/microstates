@@ -53,53 +53,37 @@ chronos = 1;
 draw = 0;
 MULTI = 10;
 W_init = 0;
-switch nargin
-    case 2
-        OUTEEG.subset = varargin{1};
-    case 3
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom = varargin{2};
-    case 4
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom = varargin{2};
-        OUTEEG.Kto = varargin{3};
-    case 5
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom = varargin{2};
-        OUTEEG.Kto = varargin{3};
-        OUTEEG.clustering_algorithm = varargin{4};
-    case 6
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom = varargin{2};
-        OUTEEG.Kto = varargin{3};
-        OUTEEG.clustering_algorithm = varargin{4};
-        draw = varargin{5};
-    case 7
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom = varargin{2};
-        OUTEEG.Kto = varargin{3};
-        OUTEEG.clustering_algorithm = varargin{4};
-        draw = varargin{5};
-        lambda = varargin{6};
-    case 8
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom= varargin{2};
-        OUTEEG.Kto = varargin{3};
-        OUTEEG.clustering_algorithm = varargin{4};
-        draw = varargin{5};
-        lambda = varargin{6};
-        chronos = varargin{7};
-    case 9
-        OUTEEG.subset = varargin{1};
-        OUTEEG.Kfrom = varargin{2};
-        OUTEEG.Kto = varargin{3};
-        OUTEEG.clustering_algorithm = varargin{4};
-        draw = varargin{5};
-        lambda = varargin{6};
-        chronos = varargin{7};
-        OUTEEG.W_init = varargin{8};
-    otherwise
+for i = 1:2:length(varargin)
+    Param = varargin{i};
+    Value = varargin{i+1};
+    if ~isstr(Param)
+        error('Flag arguments must be strings')
+    end
+    Param = lower(Param);
+    switch Param
+        case 'clustering_algorithm'
+            OUTEEG.clustering_algorithm = Value;
+        case 'subset'
+            OUTEEG.subset = Value;
+        case 'kfrom'
+            OUTEEG.Kfrom = Value;
+        case 'kto'
+            OUTEEG.Kto = Value;
+        case 'draw'
+            draw = Value;
+        case 'multi'
+            MULTI = Value;
+        case 'chronos'
+            chronos = Value;
+        case 'verbose'
+            verbose = Value;
+        case 'w_init'
+            OUTEEG.W_init = Value;
+        otherwise
+            error(['Unknown input parameter ''' Param ''' ???'])
+    end
 end
+
 if nargin < 3
     [~, ~, ~, structout] = inputgui( 'geometry', [2 3 2 3 1], ...
         'geomvert', [], 'uilist', { ...
@@ -155,7 +139,9 @@ if chronos
     Y = [Y; (1:size(Y,2))/alpha]; % temporal smoothing is done by adding a scaled timeline, [1,2,3...,OUTEEG.pnts], as a feature
 end
 % standardize data, i.e. substract mean and divide by standard deviation
-Y=bsxfun(@rdivide,bsxfun(@minus,Y,mean(Y,2)),std(Y,[],2));
+OUTEEG.data_std = std(Y,[],2);
+OUTEEG.data_mean = mean(Y,2);
+Y=bsxfun(@times,bsxfun(@minus,Y,OUTEEG.data_mean),1./OUTEEG.data_std);
 
 
 number_of_ks = OUTEEG.Kto-OUTEEG.Kfrom+1;
@@ -257,30 +243,31 @@ switch OUTEEG.clustering_algorithm
             end
             [~,best_k] = max(KL);
             OUTEEG.K = best_k + OUTEEG.Kfrom;
-            OUTEEG.Z = label(:,best_k+1);
+            OUTEEG.Z = label(:,best_k+1)';
         else
             OUTEEG.K = OUTEEG.Kto;
             c = 0;
             best_energy_so_far = Inf;
             for m=1:MULTI
-                [A,lbl,~,energy] = kmeans_fast(Y',OUTEEG.K);
+                [W,lbl,~,energy] = kmeans_fast(Y',OUTEEG.K);
                 if energy < best_energy_so_far
                     best_energy_so_far = energy;
                     c = c+1;
                 end
             end
-            OUTEEG.Z = lbl;
+            OUTEEG.Z = lbl';
         end
-%         A = zeros(OUTEEG.nbchan,OUTEEG.K);
-%         for iMCRST=1:OUTEEG.K
-%             A(:,iMCRST) = mean(OUTEEG.data(:,OUTEEG.Z==iMCRST),2);
+        %         A = zeros(OUTEEG.nbchan,OUTEEG.K);
+        %         for iMCRST=1:OUTEEG.K
+        %             A(:,iMCRST) = mean(OUTEEG.data(:,OUTEEG.Z==iMCRST),2);
+        %         end
+        OUTEEG.W = W';
+        OUTEEG.A = 0;
+%         if chronos
+%             OUTEEG.meanGMD = mean(GMD(Y(1:(size(Y,1)-1),:),OUTEEG.W(:,OUTEEG.Z),size(Y,1)-1));
+%         else
+%             OUTEEG.meanGMD = mean(GMD(Y,OUTEEG.W(:,OUTEEG.Z),OUTEEG.nbchan));
 %         end
-        OUTEEG.W = A(:,1:end-1)';
-        if chronos
-            OUTEEG.meanGMD = mean(GMD(Y(1:(size(Y,1)-1),:),OUTEEG.W(:,OUTEEG.Z),size(Y,1)-1));
-        else
-            OUTEEG.meanGMD = mean(GMD(Y,OUTEEG.W(:,OUTEEG.Z),OUTEEG.nbchan));
-        end
         if draw
             if size(Y,2) <= 5000
                 show_clusters(Y,OUTEEG.Z,0,OUTEEG.K);
@@ -319,18 +306,19 @@ switch OUTEEG.clustering_algorithm
             OUTEEG.K = best_k + OUTEEG.Kfrom;
         else
             OUTEEG.K = OUTEEG.Kto;
-            OUTEEG.Z = cluster(Z,'maxclust',OUTEEG.K);
+            OUTEEG.Z = cluster(Z,'maxclust',OUTEEG.K)';
         end
-        A = zeros(OUTEEG.nbchan,OUTEEG.K);
+        W = zeros(OUTEEG.nbchan,OUTEEG.K);
         for iMCRST=1:OUTEEG.K
-            A(:,iMCRST) = mean(OUTEEG.data(:,OUTEEG.Z==iMCRST),2);
+            W(:,iMCRST) = mean(OUTEEG.data(:,OUTEEG.Z==iMCRST),2);
         end
-        OUTEEG.W = A;
-        if chronos
-            OUTEEG.meanGMD = mean(GMD(Y(1:(size(Y,1)-1),:),A(:,OUTEEG.Z),size(Y,1)-1));
-        else
-            OUTEEG.meanGMD = mean(GMD(Y,A(:,OUTEEG.Z),OUTEEG.nbchan));
-        end
+        OUTEEG.W = W;
+        OUTEEG.A = 0;
+%         if chronos
+%             OUTEEG.meanGMD = mean(GMD(Y(1:(size(Y,1)-1),:),A(:,OUTEEG.Z),size(Y,1)-1));
+%         else
+%             OUTEEG.meanGMD = mean(GMD(Y,A(:,OUTEEG.Z),OUTEEG.nbchan));
+%         end
         if draw
             if size(Y,2) <= 5000
                 show_clusters(Y,OUTEEG.Z,0,OUTEEG.K);
@@ -338,9 +326,10 @@ switch OUTEEG.clustering_algorithm
         end
         disp('Done with agglomerative clustering')
     case 4
-        b = 5;
-        lambda = 7;
-        [OUTEEG.W,OUTEEG.A,OUTEEG.Z,OUTEEG.K,clustering_algorithm] = basicNmicrostates(double(Y(1:end-1,:)) ,OUTEEG.Kfrom,OUTEEG.Kto,MULTI,b,lambda);
+        b = 3;
+        lambda = 5;
+        [OUTEEG.W,OUTEEG.A,OUTEEG.Z,~,~,~,~,OUTEEG.K,clustering_algorithm] = basicNmicrostates(double(Y),OUTEEG.Kfrom,OUTEEG.Kto,MULTI,b,lambda,10^(-6),verbose);
+        OUTEEG.A = repmat(OUTEEG.A',OUTEEG.K,1);
     case 5
         clustering_algorithm = 'DP-means';
         Y = Y(1:end-1,:);
@@ -387,10 +376,10 @@ switch OUTEEG.clustering_algorithm
             else
                 oldz = z;
             end
-%             obj = sum(sum(d)) + lambda*k;
-%             rel_improvement = abs(1 - oldobj/obj);
-%             converged = rel_improvement < 0.0001; % change to no changes in assignment
-%             oldobj = obj;
+            %             obj = sum(sum(d)) + lambda*k;
+            %             rel_improvement = abs(1 - oldobj/obj);
+            %             converged = rel_improvement < 0.0001; % change to no changes in assignment
+            %             oldobj = obj;
         end
         OUTEEG.K = k;
         OUTEEG.W = mu;
@@ -406,18 +395,17 @@ switch OUTEEG.clustering_algorithm
             OUTEEG.K = OUTEEG.Kfrom;
         end
         draw = 0;
-        verbose = 1;
         K = OUTEEG.Kfrom;
-        alpha = 0.8;
-        gamma2 = -0.0519;
-        G = 1;
+        alpha = 2.5;
+        gamma2 = 5;
+        G = 0; %trigger
         max_nits = 5000;
         kfolds = 1;
-        %learn_rate_init = 10^(-5);
-        learn_rate_init = 0.0131;
+        learn_rate_init = 0.01;
         learn_decay = 0.0001;
         W_0 = W_init;
-        [W_var,Mu,M,beta_var,free_energy,recon_error,m_winner,nits] = variational_microstates_smooth(Y,K,draw,alpha,gamma2,MULTI,G,max_nits,kfolds,learn_rate_init,learn_decay,verbose);
+        verbose = 1;
+        [W_var,Mu,M,sigma2,allZs,beta_var,free_energy,recon_error,m_winner,nits,varargin] = variational_microstates_smooth(Y,K,draw,alpha,gamma2,MULTI,max_nits,G,learn_rate_init,learn_decay,verbose);
         disp(['Converged in ', num2str(nits), ' iterations'])
         [~,OUTEEG.Z] = max(M,[],1);
         OUTEEG.K = K;
@@ -432,18 +420,18 @@ switch OUTEEG.clustering_algorithm
         if OUTEEG.Kto~=OUTEEG.Kfrom
             OUTEEG.K = size(OUTEEG.Y,1); % J
             disp(['Looking for K = nbchan microstates, K = ', num2str(OUTEEG.K)])
+        else 
+            OUTEEG.K = OUTEEG.Kto;
         end
-        K = OUTEEG.K;
         draw = 0;
-        gamma1 = -15;
-        gamma2 = 2;
+        gamma1 = -50;
+        gamma2 = 20;
         max_nits = 2000;
-        learn_rate_init = 0.001;
+        learn_rate_init = 0.0005;
         learn_rate_decay = 0.00001;
         verbose = 1;
-        [W,X,M,~,~,~,~,~,~,~,~] = polymicro_smooth(Y,'K',K,'draw',draw,'MULTI',MULTI,'max_nits',max_nits,'learn_rate_init',learn_rate_init,'learn_rate_decay',learn_rate_decay,'gamma1',gamma1,'gamma2',gamma2,'verbose',verbose);
+        [W,X,M,~,~,~,~,~,~,~,~] = polymicro_smooth(Y,'K',OUTEEG.K,'draw',draw,'MULTI',MULTI,'max_nits',max_nits,'learn_rate_init',learn_rate_init,'learn_rate_decay',learn_rate_decay,'gamma1',gamma1,'gamma2',gamma2,'verbose',verbose);
         OUTEEG.Z = M>0.5;
-        OUTEEG.K = K;
         OUTEEG.W = W;
         OUTEEG.A = X;
     otherwise

@@ -12,17 +12,114 @@ eeglab('redraw')
 %% make ERPs from n epochs
 % two ways to do this: either move in non-overlapping windows of n, which is standard, or
 % overlapping windows of n, which gives "more" data
-n = 10;
 [J,T,nepochs] = size(Y);
-% divide Y into cells of JxTxn, and one cell with the number of epochs
-% remaining after division by n, and mean over epochs
-spm_erps = cell2mat(cellfun(@(x)mean(x,3),mat2cell(Y, [J],[T],[ones(1,floor(nepochs/n))*n rem(nepochs,n)]),'UniformOutput',false));
-clustering_algorithm = 7;
+c = 1;
+for n = [1,4,10,21,43,86]
+    % divide Y into cells of JxTxn, and one cell with the number of epochs
+    % remaining after division by n, and mean over the epochs that have
+    % equal number of events
+    this_isnt_even_my_final_form = mat2cell(Y, [J],[T],[ones(1,floor(nepochs/n))*n rem(nepochs,n)]);
+    spm_erps{c} = cell2mat(cellfun(@(x)mean(x,3),this_isnt_even_my_final_form(1:end-1),'UniformOutput',false));
+    c = c+1;
+end
 nerps = size(spm_erps,3);
-%% Tune hyperparams for polymicrostates
-Y = mean(spm_erps,3);
+%% Grand ERP
+Y = mean(Y,3);
 Y=bsxfun(@rdivide,bsxfun(@minus,Y,mean(Y,2)),std(Y,[],2));
 
+imagesc(corr(Y));colorbar()
+[U,S,~]=svdecon(Y');
+signal = U*S;
+figure;scatter(signal(:,1),signal(:,2),15,[1:size(Y,2)],'.');colorbar()
+
+% permute channels so that nearby idx's are correlated
+largeabscorr = abs(corr(Y'))>.5;
+figure;
+spy(largeabscorr)
+chan_idx = amd(largeabscorr);
+figure;
+spy(abs(corr(Y(chan_idx,1:500)'))>.5)
+Y = Y(chan_idx,:);
+%% Performance vs SNR
+%% Majority vote segmentation of grand ERP in 50 experiments
+nsnrs = 6;
+nexperiment = 50;
+clustering_algorithms = [4,6];
+nalgo = numel(clustering_algorithms);
+%recon_error = zeros(nalgo,nexperiment);
+%algoname = {'k_means','agglomerative','n_microstates','variational_microstates','polymicrostates'};
+%OUTEEGs = cell(nalgo);
+for nmicrostates = 2%[3,7]
+    for c=1:nalgo
+        for j = 4:4%nsnrs
+            tmp = spm_erps{j};
+            for k = 1:size(spm_erps{j},3)
+                EEG.data = tmp(:,:,k);
+                parfor i=1:nexperiment
+                    %std(EEG.data(:,1),[],1)
+                    % 2 = kmeans, 3 = agglo, 4 = n-microstates, 5 = dpmeans
+                    % 6 = variational microstates, 7 = polymicrostates
+                    OUTEEG = pop_getmicrostates(EEG,'Kfrom',nmicrostates,'Kto',nmicrostates,'clustering_algorithm',clustering_algorithms(c),'chronos',0,'MULTI',60,'verbose',0);
+                    %OUTEEGs{c} = OUTEEG;
+                    labelings(:,c,j,k,i) = OUTEEG.Z;
+                end
+            end
+        end
+    end
+end
+
+save('labelings5.mat','labelings');
+max_snr_Z_n = squeeze(labelings(:,1,6,1,:));
+max_snr_Z_v = squeeze(labelings(:,2,6,1,:));
+
+max_snr_Z_n = squeeze(labelings(:,1,6,2,:));
+max_snr_Z_v = squeeze(labelings(:,2,6,2,:));
+
+figure;
+subplot(121)
+imagesc(max_snr_Z_n')
+subplot(122)
+imagesc(max_snr_Z_v')
+
+[est_perm,signs]=soft_align(arr2mat(max_snr_Z_n(:,end)',nmicrostates),arr2mat(max_snr_Z_v(:,1)',nmicrostates));
+%majority_vote_n = 
+%% Test reconstruction of different algorithms
+nexperiment = 1;
+clustering_algorithms = [4,6,7];
+nalgo = numel(clustering_algorithms);
+recon_error = zeros(nalgo,nexperiment);
+EEG.data = Y;
+algoname = {'k_means','agglomerative','n_microstates','variational_microstates','polymicrostates'};
+OUTEEGs = cell(nalgo);
+for nmicrostates = 2%[3,7]
+    for c=1:nalgo
+        for i=1:nexperiment
+            %std(EEG.data(:,1),[],1)
+            % 2 = kmeans, 3 = agglo, 4 = n-microstates, 5 = dpmeans
+            % 6 = variational microstates, 7 = polymicrostates
+            OUTEEG = pop_getmicrostates(EEG,'Kfrom',nmicrostates,'Kto',nmicrostates,'clustering_algorithm',clustering_algorithms(c),'chronos',0,'MULTI',60,'verbose',0);
+            OUTEEGs{c} = OUTEEG;
+%            plotsegmentation(OUTEEG);title(num2str(clustering_algorithm));
+            %labelings(:,i) = OUTEEG.Z;
+            %foo = corr(newerps(:,:,i), OUTEEG.W(:,labelings(:,i))); % corr between frame and every microstate
+            %map2frame_correlation(:,i) = diag(foo(:,labelings(:,i))); % mean corr between frame and corresponding microstate
+            %map2frame_correlation(:,i) = foo(sub2ind(size(foo),(1:numel(labelings(:,i))).',labelings(:,i)));
+            OUTEEG= plotreconstruction(OUTEEG);
+            plotactivations(OUTEEG);
+            plotmicrostates(OUTEEG);
+            recon_error(c,i) = OUTEEG.reconstruction_error;
+            %strcat(algoname(c),'_reconstruction')
+            set(gcf,'units','normalized','outerposition',[0 0 1 1])
+            print('-dpng')
+%             if OUTEEG.A == 0
+%                 recon_error(c,i) = norm(EEG.data - OUTEEG.W*(arr2mat(OUTEEG.Z,OUTEEG.K)),'fro')/norm(EEG.data,'fro');
+%             else
+%                 recon_error(c,i) = norm(EEG.data - OUTEEG.W*(arr2mat(OUTEEG.Z,OUTEEG.K).*OUTEEG.A),'fro')/norm(EEG.data,'fro');
+%             end
+        end
+    end
+end
+%%
 params.n_iterations = 20;
 params.n_init_samples = 20;
 params.crit_name = 'cEI';
@@ -108,14 +205,14 @@ OUTEEGs_poly = cell(nerps);
 for i=1:nerps
     EEG.data = mean(spm_erps,3);
     % 2 = kmeans, 3 = agglo, 4 = n-microstates, 5 = dpmeans, 6 = multi-gar
-    %OUTEEGs_mono{i} = pop_getmicrostates(EEG,1,K,K,6);
-    OUTEEGs_poly{i} = pop_getmicrostates(EEG,1,K,K,7);
+    OUTEEGs_mono{i} = pop_getmicrostates(EEG,'subset',1,'kfrom',K,'kto',K,'clustering_algorithm',6,'multi',40);
+    OUTEEGs_poly{i} = pop_getmicrostates(EEG,'subset',1,'kfrom',K,'kto',K,'clustering_algorithm',7,'multi',40);
 end
 % entropy(OUTEEGs{1}.Z)
 % entropy(OUTEEGs{2}.Z)
 % mutualinfo(OUTEEGs{1}.Z,OUTEEGs{2}.Z)
 %% Mono
-[OUTEEGs_mono{1}, com] = merge_correlated_microstates(OUTEEGs_mono{1});
+[OUTEEGs_mono{1}, com] = merge_correlated_microstates(OUTEEGs_mono{1},4);
 plotsegmentation(OUTEEGs_mono{1});
 plotactivations(OUTEEGs_mono{1});
 plotmicrostates(OUTEEGs_mono{1});
