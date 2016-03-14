@@ -1,17 +1,16 @@
-function  [W,Mu,M,allZs,beta,free_energy,recon_error,m_winner,nits] = variational_microstates_smooth(Yall,varargin)
+function  [W,Mu,M,sigma2,allZs,beta,free_energy,recon_error,m_winner,nits,varargin] = variational_microstates_smooth(Yall,varargin)
 switch nargin
-    case 12
+    case 11
         K = varargin{1};
         draw = varargin{2};
         alpha = varargin{3};
         gamma2 = varargin{4};
         MULTI = varargin{5};
-        G = varargin{6};
-        max_nits = varargin{7};
-        kfolds = varargin{8};
-        learn_rate_init = varargin{9};
-        learn_rate_decay = varargin{10};
-        verbose = varargin{11};
+        max_nits = varargin{6};
+        trigger = varargin{7};
+        learn_rate_init = varargin{8};
+        learn_rate_decay = varargin{9};
+        verbose = varargin{10};
     otherwise
 end
 [allJ,T]=size(Yall);
@@ -19,19 +18,8 @@ normYall = norm(Yall,'fro');
 converged = 0;
 nits = 0;
 best_free_energy = Inf;
-% There's no smoothing when gamma2 = 0
-% That would be the case when 
-% gamma1 = p0 <=> (1-p0)/(K-1) = p0 <=> p0 = 1/K
-%gamma1 = (1-p0)/(K-1); 
-%gamma2 = (p0-gamma1)/gamma1; 
-% If we make the substitution p0 = log(p0)
-%gamma1 = (1-logp0)/(K-1);
-%gamma2 = (logp0-gamma1)/gamma1; 
-% Then lim(p0 -> 0) gamma2(log(p0)) = -K
-%gamma2 = -K;
-%gamma2 = -8;
-free_energy = zeros(1,MULTI);
-recon_error = zeros(1,MULTI);
+free_energy = zeros(MULTI,1);
+recon_error = zeros(MULTI,1);
 % train multi models and evaluate each on a test set, select the model that
 % has lowest mean test-error over folds
 bestM = rand(K,T);
@@ -53,12 +41,14 @@ nits_total = 0;
 disp('Fitting model...')
 minimum_description_length = Inf;
 % test & training
+kfolds = 1;
 splitj = floor(allJ/kfolds);
 jidxs = randperm(allJ);
 jidxs = reshape(jidxs,splitj,kfolds);
 allZs = zeros(T,MULTI);
 for m=1:MULTI
-    learn_rate0 = max(learn_rate_init + (rand-.5)*0.5,0.1);
+    %learn_rate0 = max(learn_rate_init + (rand-.5)*0.5,0.1);
+    learn_rate0 = learn_rate_init;
     learn_decay0 = learn_rate_decay;
     %     learn_rate0 = learn_rate_init;
     %     learn_decay0 = learn_rate_decay;
@@ -71,7 +61,7 @@ for m=1:MULTI
     %     %M = Ms+random_stuff_1(:,1:t);
     %     M = random_stuff_1+rand(K,T)*0.3;
     %     M = bsxfun(@rdivide,M,sum(M,1));
-    for k=1:kfolds
+    for k=1:1
         learn_rate = learn_rate0;
         learn_decay = learn_decay0;
         nits = 0;
@@ -93,9 +83,11 @@ for m=1:MULTI
         Mu = Mu';
         [~,Ms] = max(Mu,[],1);
         Ms = arr2mat(Ms,K);
-        M = random_stuff_1+rand(K,T)*0.1;
+        M = Ms+rand(K,T)*0.1;
         M = bsxfun(@rdivide,M,sum(M,1));
+
         beta=1/mean(mean(Y.*Y));
+
         WcircW = W.*W;
         diagWW=sum(WcircW,1);
         WY = W'*Y;
@@ -109,6 +101,8 @@ for m=1:MULTI
             %             M=softmax(beta*( (WY).*Mu - 0.5*diag(diagWW)*(Mu.^2 + sigma2))+ gamma1 + gamma2*([M(:,2:end) zeros(K,1)] + [zeros(K,1) M(:,1:end-1)]));
             Mtm1 = [zeros(K,1) M(:,1:end-1)];
             Mtp1 = [M(:,2:end) zeros(K,1)];
+            %gamma2 = (1-learn_rate)*gamma2 -learn_rate*sum(sum(Mtm1.*M));
+            %gamma2 = 1/mean(mean(Mtm1.*M));
             M=softmax(beta*( (WY).*Mu - 0.5*diag(diagWW)*(Mu.^2 + sigma2))+gamma2*(Mtm1+Mtp1));
             if isnan(M)
                 keyboard
@@ -210,7 +204,7 @@ for m=1:MULTI
             %             converged = converged_M*converged_allK*converged_beta;
             %converged =  abs(recon_err_train_old-recon_err_train) < tol;
             tol = 10^(-3);
-%             converged_beta = ( abs(beta-beta_old)/beta_old )< tol*beta_old;
+            converged = abs(beta-oldbeta)/oldbeta< tol;
 %             if nits>2
 %                 if isnan(free_energy(nits,m)) | nits > max_nits
 %                     if verbose
@@ -221,7 +215,7 @@ for m=1:MULTI
 %                     converged = norm(M-oldM)/norm(M) < tol;
 %                 end
 %             end
-            converged = norm(M-oldM)/norm(M) < tol;
+            %converged = norm(M-oldM)/norm(M) < tol;
             if converged*verbose
                 disp(['Converged in ', num2str(nits), ' iterations']);
             end
@@ -272,10 +266,12 @@ for m=1:MULTI
         %             drawnow
         %         end
     end
-    %if mean(free_energy(m,:,2)) < best_free_energy
-    encoding_length = description_length(Z);
-    if encoding_length < minimum_description_length;%recon_error(m) < best_free_energy
-        minimum_description_length = encoding_length;
+    if free_energy(m) < best_free_energy
+    %encoding_length = description_length(Z);
+    %if encoding_length < minimum_description_length;
+        %recon_error(m) < best_free_energy
+        %minimum_description_length = encoding_length;
+        best_free_energy = free_energy(m);
         bestMu = Mu;
         bestM = M;
         bestsigma2 = sigma2;
