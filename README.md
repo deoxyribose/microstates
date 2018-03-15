@@ -1,3 +1,6 @@
+## Go to https://github.com/atpoulsen/Microstate-EEGlab-toolbox for newer versions!
+
+
 An EEGLAB-toolbox for finding [microstates](http://www.scholarpedia.org/article/EEG_microstates) in EEG signals.
 
 Requires [EEGLAB](http://sccn.ucsd.edu/eeglab/) and [FastICA](http://research.ics.aalto.fi/ica/fastica/)
